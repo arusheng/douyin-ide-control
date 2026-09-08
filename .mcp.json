@@ -1,0 +1,7 @@
+{
+  "douyin-ide-control": {
+    "command": "node",
+    "args": ["./src/server.mjs"],
+    "startup_timeout_sec": 30
+  }
+}

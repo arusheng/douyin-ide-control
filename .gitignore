@@ -1,0 +1,14 @@
+node_modules/
+.scratch/
+.mcp-smoke/
+.env
+.env.*
+*.log
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.zip
+dist/
+build/

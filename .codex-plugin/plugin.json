@@ -1,0 +1,27 @@
+{
+  "name": "douyin-ide-control",
+  "version": "0.1.0+codex.20260806221800",
+  "description": "通过官方 tt-ide-cli 与本地 IDE 调试接口安全控制抖音开发者工具。",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "抖音 IDE 控制",
+    "shortDescription": "安全控制抖音开发者工具。",
+    "longDescription": "封装官方 tt-ide-cli，并在 CLI 缺失能力时使用本地 IDE 调试接口和 Windows 原生截图。上传、提审等高风险动作需要显式确认。",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "检查抖音 IDE 与当前项目状态",
+      "触发 IDE 编译并读取控制台错误",
+      "截取 IDE 全窗或模拟器画面"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
