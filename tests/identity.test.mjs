@@ -144,7 +144,7 @@ test("IDE 实际 AppID 与预期不同 → APPID_MISMATCH", async () => {
   const dir = makeProject({ "game.js": "// game", "game.json": "{}", "project.config.json": '{"appid":"tt00000000000000000000"}' });
   try {
     stubProbes({
-      meta: { ok: true, stdout: "AppID: tt11111111111111111111 类型: 小游戏" },
+      meta: { ok: true, stdout: "AppID: tt9999999999999999 类型: 小游戏" },
       ideTexts: [{ title: "wb", body: "minigame", type: "page" }],
     });
     let error = null;
@@ -153,7 +153,7 @@ test("IDE 实际 AppID 与预期不同 → APPID_MISMATCH", async () => {
     } catch (e) { error = e; }
     assert.ok(error, "应当抛出错误");
     assert.equal(error.code, "APPID_MISMATCH");
-    assert.equal(error.details.identity.ideActualAppid, "tt11111111111111111111");
+    assert.equal(error.details.identity.ideActualAppid, "tt9999999999999999");
     assert.equal(error.details.identity.configuredAppid, "tt00000000000000000000", "配置文件 AppID 应作为 configuredAppid 保留");
   } finally {
     cleanup(dir);
@@ -269,7 +269,7 @@ test("创建成功后必须二次验证类型：身份识别用于复核（模�
 
 test("多工程污染：workbench 同时含小程序与目标小游戏工程时，按 projectPath 绑定判为 minigame", async () => {
   const dir = makeProject({ "game.js": "// game", "game.json": "{}", "project.config.json": '{"appid":"tt00000000000000000000"}' });
-  const otherDir = "D:\\other\\miniapp-proj";
+  const otherDir = "D:\\other-projects\\miniapp-proj";
   try {
     setIdentityProbes({
       findIdeMainPort: async () => ({ port: 8702, targets: [], hasFrontPage: true, hasWorkbench: false }),
@@ -292,7 +292,7 @@ test("多工程污染：workbench 同时含小程序与目标小游戏工程时�
 
 test("多工程污染：其他工程的 MiniApp Webview 编译错误（can't find app.json）不得污染目标小游戏工程", async () => {
   const dir = makeProject({ "game.js": "// game", "game.json": "{}", "project.config.json": '{"appid":"tt00000000000000000000"}' });
-  const otherDir = "D:\\other\\miniapp-proj";
+  const otherDir = "D:\\other-projects\\miniapp-proj";
   try {
     setIdentityProbes({
       findIdeMainPort: async () => ({ port: 8702, targets: [
@@ -337,5 +337,3 @@ test("get-meta 元数据含裸 game 词但不含类型词时，不得判为小�
     setIdentityProbes(null);
   }
 });
-
-

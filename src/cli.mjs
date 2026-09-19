@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { PROJECT_ROOT, redact, trimText } from "./path-policy.mjs";
+import { execFileSync, spawn } from "node:child_process";
+import { WORKSPACE_ROOT, redact, trimText } from "./path-policy.mjs";
 import { killTree } from "./proc.mjs";
 
 // IDE 启动就绪探测：窗口/进程检测与 CDP 检测的依赖，仅用于轮询就绪状态
@@ -38,6 +38,31 @@ function pathCandidates() {
   ]);
 }
 
+// 探测 npm 全局安装根目录。不写死任何盘符/用户目录：
+// 优先 DOUYIN_NPM_GLOBAL_ROOT 显式覆盖，其次问 npm 自己（npm root -g），
+// 最后退回 PATH 里 shim 探测。这样换机器/npm prefix 变化都不会失效。
+function npmGlobalRoot() {
+  if (process.env.DOUYIN_NPM_GLOBAL_ROOT) return process.env.DOUYIN_NPM_GLOBAL_ROOT;
+  try {
+    const out = execFileSync("npm", ["root", "-g"], {
+      encoding: "utf8", windowsHide: true, timeout: 8000, shell: true,
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+    const resolved = String(out || "").trim().split(/\r?\n/).filter(Boolean).pop();
+    return resolved || null;
+  } catch {
+    return null;
+  }
+}
+
+// 从 npm 全局根目录解析 tma.js（跨机器，不绑定固定路径）
+function fromGlobalRoot() {
+  const root = npmGlobalRoot();
+  if (!root) return null;
+  const candidate = path.join(root, "tt-ide-cli", "bin", "tma.js");
+  return file(candidate) ? candidate : null;
+}
+
 export async function resolveTmaCli() {
   if (!cliPathPromise) cliPathPromise = Promise.resolve().then(() => {
     const explicit = process.env.DOUYIN_TMA_CLI_JS;
@@ -46,8 +71,11 @@ export async function resolveTmaCli() {
       const resolved = fromShim(candidate);
       if (resolved) return resolved;
     }
+    const globalInstall = fromGlobalRoot();
+    if (globalInstall) return globalInstall;
     throw new CliError("CLI_NOT_FOUND", "未找到官方 tt-ide-cli/tma。", {
-      hint: "请先执行 npm install -g tt-ide-cli，或设置 DOUYIN_TMA_CLI_JS 指向 tma.js",
+      hint: "请先执行 npm install -g tt-ide-cli，或设置 DOUYIN_TMA_CLI_JS 指向 tma.js，或设置 DOUYIN_NPM_GLOBAL_ROOT 指向 npm 全局根目录",
+      probe: { npmGlobalRoot: npmGlobalRoot(), pathEntries: (process.env.PATH || "").split(path.delimiter).filter(Boolean).length },
     });
   });
   return cliPathPromise;
@@ -96,9 +124,46 @@ function runProcess(executable, args, options) {
   });
 }
 
-export async function runTma(args, { cwd = PROJECT_ROOT, timeoutMs = 30000, env } = {}) {
+/**
+ * 解析 CLI 子进程的工作目录（cwd）。
+ *
+ * 优先级：
+ *   1. projectPath —— 带项目路径的命令，优先使用已经过路径白名单验证且确实存在的项目目录；
+ *   2. cwd —— 调用方显式传入且存在的目录；
+ *   3. WORKSPACE_ROOT —— 不依赖项目目录的命令，使用明确配置且存在的工作区根目录。
+ *
+ * 三者均不存在时抛出结构化错误 CLI_CWD_NOT_FOUND，绝不静默换到 process.cwd() 或其他目录。
+ * 这样配置错误（如工作区路径拼写错误、项目被移动/删除）会被立即暴露，而不是在错误目录下执行 CLI。
+ */
+export function resolveCwd({ projectPath, cwd } = {}) {
+  const candidates = [];
+  if (projectPath) candidates.push(projectPath);
+  if (cwd) candidates.push(cwd);
+  candidates.push(WORKSPACE_ROOT);
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      // existsSync/statSync 抛错（如权限不足）时视为不可用，继续尝试下一个候选
+    }
+  }
+
+  throw new CliError("CLI_CWD_NOT_FOUND", "无法确定 CLI 子进程工作目录：配置的工作区或项目目录均不存在", {
+    workspaceRoot: WORKSPACE_ROOT,
+    workspaceExists: (() => { try { return fs.existsSync(WORKSPACE_ROOT); } catch { return false; } })(),
+    projectPath: projectPath || null,
+    explicitCwd: cwd || null,
+  });
+}
+
+export async function runTma(args, { cwd, projectPath, timeoutMs = 30000, env } = {}) {
   const cli = await resolveTmaCli();
-  return runProcess(process.execPath, [cli, ...args], { cwd, timeoutMs, env });
+  const effectiveCwd = resolveCwd({ projectPath, cwd });
+  return runProcess(process.execPath, [cli, ...args], { cwd: effectiveCwd, timeoutMs, env });
 }
 
 export function commandFailure(result, command) {
@@ -130,7 +195,7 @@ export async function inspectCli() {
 }
 
 export async function openProject(projectPath, timeoutMs) {
-  const result = await runTma(["open", projectPath], { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(["open", projectPath], { projectPath, timeoutMs });
   return commandFailure(result, `open ${projectPath}`);
 }
 
@@ -275,14 +340,14 @@ export async function previewProject(projectPath, outputPath, { timeoutMs = 9000
   if (scene) args.push("--miniapp-scene", String(scene));
   if (launchFrom) args.push("--miniapp-launch-from", launchFrom);
   args.push(projectPath);
-  const result = await runTma(args, { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(args, { projectPath, timeoutMs });
   return commandFailure(result, `preview ${projectPath}`);
 }
 
 export async function buildNpm(projectPath, timeoutMs) {
   const result = await runTma(
     ["build-npm", "--project-path", projectPath],
-    { cwd: PROJECT_ROOT, timeoutMs },
+    { projectPath, timeoutMs },
   );
   return commandFailure(result, `build-npm ${projectPath}`);
 }
@@ -291,17 +356,17 @@ export async function projectSize(projectPath, { json = false, timeoutMs = 30000
   const args = ["project-size"];
   if (json) args.push("--json");
   args.push(projectPath);
-  const result = await runTma(args, { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(args, { projectPath, timeoutMs });
   return commandFailure(result, `project-size ${projectPath}`);
 }
 
 export async function auditHosts(appid, timeoutMs = 30000) {
-  const result = await runTma(["hosts", appid], { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(["hosts", appid], { timeoutMs });
   return commandFailure(result, `hosts ${appid}`);
 }
 
 export async function setAppConfig(appid, token, timeoutMs = 30000) {
-  const result = await runTma(["set-app-config", appid, "--token", token], { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(["set-app-config", appid, "--token", token], { timeoutMs });
   return commandFailure(result, `set-app-config ${appid}`);
 }
 
@@ -310,7 +375,7 @@ export async function uploadProject(projectPath, args, timeoutMs) {
   if (args.appVersion) cliArgs.push("--app-version", args.appVersion);
   if (args.channel) cliArgs.push("--channel", args.channel);
   cliArgs.push(projectPath);
-  const result = await runTma(cliArgs, { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(cliArgs, { projectPath, timeoutMs });
   return commandFailure(result, "upload [已确认]");
 }
 
@@ -319,6 +384,6 @@ export async function auditProject(appid, args, timeoutMs) {
   if (args.autoPublish !== undefined) cliArgs.push("--auto-publish", String(args.autoPublish));
   if (args.channel) cliArgs.push("--channel", args.channel);
   cliArgs.push(appid);
-  const result = await runTma(cliArgs, { cwd: PROJECT_ROOT, timeoutMs });
+  const result = await runTma(cliArgs, { timeoutMs });
   return commandFailure(result, "audit [已确认]");
 }

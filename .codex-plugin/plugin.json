@@ -1,6 +1,6 @@
 {
   "name": "douyin-ide-control",
-  "version": "0.2.0+codex.20260919191839",
+  "version": "0.3.0+codex.20260919201548",
   "description": "通过官方 tt-ide-cli 与本地 IDE 调试接口安全控制抖音开发者工具。",
   "author": {
     "name": "Local developer"
@@ -8,8 +8,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "抖音 IDE 控制",
-    "shortDescription": "安全控制抖音开发者工具。",
-    "longDescription": "封装官方 tt-ide-cli，并在 CLI 缺失能力时使用本地 IDE 调试接口和 Windows 原生截图。上传、提审等高风险动作需要显式确认。",
+    "shortDescription": "检查、编译、预览并安全操作抖音开发者工具。",
+    "longDescription": "通过官方 tt-ide-cli 和已登录 IDE 完成项目检查、身份核验、编译、预览、截图与上传。上传、提审等远程操作会先严格绑定目标工程并核对身份，要求本次明确确认，并在提交后核验 IDE 的实际结果；结果不明确时不会自动重试。IDE 弹出项目信任提示时不会自动信任。",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [
@@ -18,9 +18,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "检查抖音 IDE 与当前项目状态",
-      "触发 IDE 编译并读取控制台错误",
-      "截取 IDE 全窗或模拟器画面"
+      "检查当前抖音项目、IDE 和项目类型，先不要执行写操作",
+      "编译当前项目并读取控制台错误；需要时截取模拟器画面或生成预览二维码",
+      "准备通过已登录 IDE 上传：先核对项目、版本号和更新日志，得到我明确确认后再提交，并在提交后核验结果"
     ]
   },
   "mcpServers": "./.mcp.json"

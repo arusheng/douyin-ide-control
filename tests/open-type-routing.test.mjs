@@ -36,7 +36,7 @@ test("probeProjectType：小游戏目录（game.js+game.json）→ hint=minigame
   const dir = makeDir({
     "game.js": "// game",
     "game.json": "{}",
-    "project.config.json": '{"appid":"tt00000000000000000000","projectname":"sample-project"}',
+    "project.config.json": '{"appid":"tt00000000000000000000","projectname":"sample-game"}',
   });
   try {
     const probe = probeProjectType(dir);
@@ -112,12 +112,12 @@ test("openProjectWithReadiness 传入 tmg runner 时绝不调用默认 tma open�
   let tmgCalled = false;
   const tmgRunner = async (projectPath, cliTimeoutMs) => {
     tmgCalled = true;
-    assert.equal(projectPath, "D:\\动物大作战\\minigame\\sample-minigame");
+    assert.equal(projectPath, "D:\\projects\\minigame\\sample-minigame");
     assert.ok(cliTimeoutMs > 0, "应传入 CLI 超时");
     return { exitCode: 0, timedOut: false, stdout: "Open IDE success", stderr: "" };
   };
 
-  const result = await openProjectWithReadiness("D:\\动物大作战\\minigame\\sample-minigame", {
+  const result = await openProjectWithReadiness("D:\\projects\\minigame\\sample-minigame", {
     cliTimeoutMs: 5000,
     pollTotalMs: 3000,
     pollIntervalMs: 100,
@@ -150,7 +150,7 @@ test("tmg runner 失败时（模拟 server 层包装）顶层抛出 CLI 错误�
 
   let rejected = null;
   try {
-    await openProjectWithReadiness("D:\\动物大作战\\minigame\\sample-minigame", {
+    await openProjectWithReadiness("D:\\projects\\minigame\\sample-minigame", {
       cliTimeoutMs: 5000,
       pollTotalMs: 3000,
       pollIntervalMs: 100,
@@ -169,5 +169,3 @@ test("恢复注入替身，避免影响其他用例", () => {
   setReadinessProbes(null);
   assert.ok(true);
 });
-
-

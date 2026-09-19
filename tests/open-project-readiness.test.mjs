@@ -7,7 +7,7 @@ function stubCliSuccess() {
   setCliRunner(async () => ({
     exitCode: 0,
     timedOut: false,
-    stdout: "Open project. [path=D:\\动物大作战\\project]\nOpen IDE success\n",
+    stdout: "Open project. [path=D:\\projects\\project]\nOpen IDE success\n",
     stderr: "",
   }));
 }
@@ -67,7 +67,7 @@ test("CLI 报成功但只有进程存活、无窗口/CDP 时抛出 IDE_STARTUP_T
 
   let rejected = null;
   try {
-    await openProjectWithReadiness("D:\\动物大作战\\project", {
+    await openProjectWithReadiness("D:\\projects\\project", {
       cliTimeoutMs: 5000,
       pollTotalMs: 3000,
       pollIntervalMs: 100,
@@ -95,7 +95,7 @@ test("CLI 报成功但 IDE 窗口/CDP/进程均未就绪时抛出 IDE_STARTUP_TI
 
   let rejected = null;
   try {
-    await openProjectWithReadiness("D:\\动物大作战\\project", {
+    await openProjectWithReadiness("D:\\projects\\project", {
       cliTimeoutMs: 5000,
       pollTotalMs: 3000,
       pollIntervalMs: 100,
@@ -124,7 +124,7 @@ test("窗口探针就绪时视为 IDE 启动成功", async () => {
     process: async () => ({ running: true }),
   });
 
-  const result = await openProjectWithReadiness("D:\\动物大作战\\project", {
+  const result = await openProjectWithReadiness("D:\\projects\\project", {
     cliTimeoutMs: 5000,
     pollTotalMs: 3000,
     pollIntervalMs: 100,
@@ -142,7 +142,7 @@ test("CDP 探针就绪（含 port/targets 字段，未显式 supported）时视�
     process: async () => ({ running: false }),
   });
 
-  const result = await openProjectWithReadiness("D:\\动物大作战\\project", {
+  const result = await openProjectWithReadiness("D:\\projects\\project", {
     cliTimeoutMs: 5000,
     pollTotalMs: 3000,
     pollIntervalMs: 100,

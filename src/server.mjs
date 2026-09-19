@@ -7,7 +7,8 @@ import {
   auditHosts, auditProject, buildNpm, inspectCli, openProjectWithReadiness,
   previewProject, projectSize, resolveOpenRouting, setAppConfig, setReadinessProbes, uploadProject,
 } from "./cli.mjs";
-import { captureSimulator, clickWorkbenchText, getIdeStatus, previewInIde, readConsoleErrors, uploadInIde } from "./cdp.mjs";
+import { captureSimulator, clickWorkbenchText, getIdeStatus, previewInIde, readConsoleErrors } from "./cdp.mjs";
+import { uploadInIde } from "./ide-upload.mjs";
 import {
   captureIdeWindow, focusIde, getIdeWindowInfo, getUiaInfo, invokeUiaControl, sendShortcut,
 } from "./native.mjs";
@@ -19,11 +20,14 @@ import {
   waitForFrontPageText, resolveProjectIdentity,
 } from "./identity.mjs";
 import {
-  WORKSPACE_ROOT, allowedPath, ensureOutputPath, errorObject, trimText,
+  WORKSPACE_CONFIGURED, WORKSPACE_ROOT, allowedPath, ensureOutputPath, errorObject, trimText, workspaceNotConfigured,
 } from "./path-policy.mjs";
 import { getIdeProcessIds } from "./proc.mjs";
 
-const VERSION = "0.1.0";
+// 版本号以 package.json 为唯一来源，避免三处（package.json / plugin.json / serverInfo）各自漂移。
+// plugin.json 允许在此基础上附加 cachebuster 后缀，基础版本必须一致。
+const PACKAGE = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const VERSION = PACKAGE.version;
 const server = new McpServer({ name: "douyin-ide-control", version: VERSION });
 
 // IDE 进程存活探测：按可执行路径匹配（PowerShell Get-CimInstance，不依赖 wmic）
@@ -120,6 +124,27 @@ server.registerTool("douyin_check_environment", {
   description: "检查官方 tt-ide-cli、抖音开发者工具、当前项目和本地调试接口状态，不读取源码内容。",
   inputSchema: { projectPath: z.string().optional(), timeoutMs: z.number().int().optional() },
 }, async (args) => run("douyin_check_environment", async () => {
+  // 环境检查是排障入口：未配置工作区时如实报告，而不是抛错让用户猜。
+  // 其余工具仍会因 allowedPath 抛 WORKSPACE_NOT_CONFIGURED 而拒绝执行。
+  if (!WORKSPACE_CONFIGURED) {
+    const [cli, ideWindow, cdp, uia] = await Promise.all([
+      inspectCli().catch((error) => ({ supported: false, reason: trimText(error.message) })),
+      getIdeWindowInfo(timeout(args, 5000)).catch((error) => ({ supported: false, reason: trimText(error.message) })),
+      getIdeStatus(timeout(args, 5000)).catch((error) => ({ supported: false, reason: trimText(error.message) })),
+      getUiaInfo(timeout(args, 5000)).catch((error) => ({ supported: false, reason: trimText(error.message) })),
+    ]);
+    return {
+      workspaceRoot: null,
+      workspaceConfigured: false,
+      workspaceError: {
+        code: "WORKSPACE_NOT_CONFIGURED",
+        message: workspaceNotConfigured().message,
+        hint: "请为该 MCP 服务器设置环境变量 DOUYIN_WORKSPACE_ROOT（宿主 MCP 配置的 env，或进程环境变量）后重启 MCP",
+      },
+      project: null,
+      cli, ideWindow, cdp, uia,
+    };
+  }
   const projectPath = allowedPath(args?.projectPath);
   const [cli, ideWindow, cdp, uia] = await Promise.all([
     inspectCli(),
@@ -127,7 +152,7 @@ server.registerTool("douyin_check_environment", {
     getIdeStatus(timeout(args, 5000), projectPath).catch((error) => ({ supported: false, reason: trimText(error.message) })),
     getUiaInfo(timeout(args, 5000)).catch((error) => ({ supported: false, reason: trimText(error.message) })),
   ]);
-  return { workspaceRoot: WORKSPACE_ROOT, project: projectInfo(projectPath), cli, ideWindow, cdp, uia };
+  return { workspaceRoot: WORKSPACE_ROOT, workspaceConfigured: true, project: projectInfo(projectPath), cli, ideWindow, cdp, uia };
 }));
 
 server.registerTool("douyin_open_project", {
@@ -657,11 +682,20 @@ server.registerTool("douyin_project_version", {
 }));
 
 server.registerTool("douyin_ide_preview", {
-  title: "在 IDE 内生成预览二维码（绕过 CLI 登录）",
-  description: "直接点击已登录抖音开发者工具 workbench 的「预览」按钮生成预览二维码（无需 CLI 登录态），从 DOM 提取二维码 PNG 保存到工作区。",
-  inputSchema: { projectPath: z.string().optional(), outputPath: z.string().optional(), timeoutMs: z.number().int().optional() },
+  title: "通过已登录 IDE 生成预览二维码",
+  description: "在指定项目的已登录抖音开发者工具中点击「预览」，提取二维码 PNG 并保存到工作区。适用于 CLI 登录不可用或用户明确要求使用 IDE 登录态的情况。多项目并存时必须传入 projectPath。传 expectedAppid 会先核对 IDE 当前工程身份，不符时返回结构化错误而非预览其他工程。",
+  inputSchema: {
+    projectPath: z.string().optional(),
+    outputPath: z.string().optional(),
+    expectedAppid: z.string().optional(),
+    timeoutMs: z.number().int().optional(),
+  },
 }, async (args) => run("douyin_ide_preview", async () => {
   const projectPath = args?.projectPath ? allowedPath(args.projectPath) : undefined;
+  // 多开 IDE 时先按 AppID 绑定工程，避免把别的工程二维码取回来
+  if (projectPath && args?.expectedAppid) {
+    await resolveProjectIdentity(projectPath, { expectedAppid: args.expectedAppid, timeoutMs: timeout(args, 15000) });
+  }
   const output = ensureOutputPath(args?.outputPath, path.join(WORKSPACE_ROOT, "qa", "mcp", "ide-preview-qr.png"));
   const result = await previewInIde({ projectPath, timeoutMs: timeout(args, 25000) });
   if (!result.supported || !result.qr?.data) {
@@ -682,32 +716,66 @@ server.registerTool("douyin_ide_preview", {
 }));
 
 server.registerTool("douyin_ide_upload", {
-  title: "在 IDE 内上传（绕过 CLI 登录，危险）",
-  description: "直接操控已登录的抖音开发者工具完成上传：点击「上传」→ 填写版本号/更新日志 → 点击「确定」。无需 CLI 登录态。默认拒绝，必须 confirm=true；上传将以 IDE 当前登录账号执行（远程副作用）。",
+  title: "通过已登录 IDE 提交上传（需确认）",
+  description: "在指定项目的已登录抖音开发者工具中填写版本号和更新日志并触发上传。projectPath、appVersion、appChangelog 均为必填：工具绝不猜测版本号，也不使用默认值。上传前先严格绑定目标工程的 workbench 并核对身份。若 IDE 正在显示项目信任弹窗，默认返回 IDE_PROJECT_TRUST_REQUIRED，不会自动信任（信任意味着在模拟器中运行该工程代码，属于用户决定）；只有显式传入 confirmTrust=true 才会自动点击「信任并运行」，该参数与上传授权 confirm 相互独立。返回的 submitted=true 只表示「已点击确定」，最终结论看 status：success / failed / unverified。结果不明确时不会自动重试，以免重复上传。",
   inputSchema: {
-    projectPath: z.string().optional(),
-    appVersion: z.string().optional(),
+    projectPath: z.string().min(1),
+    appVersion: z.string().min(1),
     appChangelog: z.string().min(1),
+    expectedAppid: z.string().optional(),
+    expectedProjectType: z.enum(["minigame", "miniapp"]).optional(),
     confirm: z.boolean().optional(),
+    confirmTrust: z.boolean().optional(),
     timeoutMs: z.number().int().optional(),
   },
 }, async (args) => run("douyin_ide_upload", async () => {
   if (args?.confirm !== true) throw confirmationError("douyin_ide_upload");
-  const projectPath = args?.projectPath ? allowedPath(args.projectPath) : undefined;
-  const result = await uploadInIde({
-    projectPath, appVersion: args?.appVersion, appChangelog: args.appChangelog,
-    hitsSubmit: true, timeoutMs: timeout(args, 60000),
+  const projectPath = allowedPath(args.projectPath);
+  // 上传前必须核对目标项目与项目类型：AppID/类型不符时抛结构化错误，绝不带着错项目上传
+  const identityResult = await resolveProjectIdentity(projectPath, {
+    expectedAppid: args?.expectedAppid,
+    expectedProjectType: args?.expectedProjectType,
+    timeoutMs: timeout(args, 15000),
   });
-  if (!result.supported || !result.submitted) {
-    const error = new Error(result.reason || "IDE 内上传未完成");
-    error.code = "IDE_UPLOAD_FAILED";
-    error.details = { click: result.click, submit: result.submit, filled: result.filled };
+  // uploadInIde 在"没能真正提交"时抛顶层错误（未绑定工程/信任未授权/弹窗缺失/填表失败/按钮缺失），
+  // 因此走到这里只可能是"已点击提交"或"hitsSubmit=false 只填表"。
+  const result = await uploadInIde({
+    projectPath,
+    appVersion: args.appVersion,
+    appChangelog: args.appChangelog,
+    confirm: true,
+    confirmTrust: args?.confirmTrust === true,
+    hitsSubmit: true,
+    timeoutMs: timeout(args, 60000),
+  });
+  const verification = result.verification || { status: "unverified", reason: "未执行结果核验", autoRetry: false, retryRecommended: false };
+  // 明确失败时以顶层错误返回，避免调用方把 failed 当成功
+  if (verification.status === "failed") {
+    const error = new Error(`IDE 明确报告上传失败：${(verification.evidence || []).join("；") || "未提供原因"}`);
+    error.code = "IDE_UPLOAD_REPORTED_FAILURE";
+    error.details = { verification, filled: result.filled, submit: result.submit };
     throw error;
   }
-  return { confirmed: true, submitted: true, filled: result.filled, submit: result.submit };
+  return {
+    confirmed: true,
+    // submitted 仅代表已点击提交，不代表平台最终结果
+    submitted: result.submitted,
+    status: verification.status,
+    verified: verification.status === "success",
+    verification,
+    // 结果不明确时明确告知不要重试，避免重复上传
+    autoRetry: false,
+    retryRecommended: false,
+    identity: { projectType: identityResult.identity.projectType, ideActualAppid: identityResult.identity.ideActualAppid },
+    // 若本次自动信任过工程，如实回报（confirmTrust 与 confirm 相互独立）
+    trustAction: result.trustAction || null,
+    filled: result.filled,
+    submit: result.submit,
+    intermediateDialogs: result.intermediateDialogs,
+  };
 }));
 
 const transport = new StdioServerTransport();
 transport.onerror = (error) => log("transport", error.message);
 await server.connect(transport);
-log("server", `stdio MCP 已启动，工作区 ${WORKSPACE_ROOT}`);
+log("server", `stdio MCP v${VERSION} 已启动，工作区 ${WORKSPACE_CONFIGURED ? WORKSPACE_ROOT : "(未配置 DOUYIN_WORKSPACE_ROOT)"}`);

@@ -5,15 +5,33 @@ import { spawn } from "node:child_process";
 import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandFailure } from "../src/cli.mjs";
-import { ensureOutputPath, WORKSPACE_ROOT } from "../src/path-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// 测试工作区固定为进程临时目录下的示例工作区，避免依赖任何机器的真实路径。
+// 关键：ESM 的 import 会被提升，因此必须在**动态导入** path-policy 之前设置环境变量，
+// 否则 WORKSPACE_CONFIGURED 会是 false，path-policy 会按"未配置工作区"拒绝。
+const FIXTURE_WORKSPACE = path.join(os.tmpdir(), "douyin-ide-control-test-workspace");
+process.env.DOUYIN_WORKSPACE_ROOT = FIXTURE_WORKSPACE;
+
+const { commandFailure } = await import("../src/cli.mjs");
+const { ensureOutputPath, WORKSPACE_ROOT, WORKSPACE_CONFIGURED } = await import("../src/path-policy.mjs");
+
+const fixtureMinigame = path.join(FIXTURE_WORKSPACE, "minigame");
+
+// 非空目录夹具：create_minigame_project 必须据此返回 DIRECTORY_NOT_EMPTY
+fs.mkdirSync(fixtureMinigame, { recursive: true });
+fs.writeFileSync(path.join(fixtureMinigame, "project.config.json"), '{"appid":"tt00000000000000000000"}');
+
 function startServer() {
+  return startServerWithEnv({ ...process.env, DOUYIN_WORKSPACE_ROOT: FIXTURE_WORKSPACE });
+}
+
+// 允许指定完整环境（用于验证"未配置工作区"的实例）
+function startServerWithEnv(env) {
   const child = spawn(process.execPath, ["src/server.mjs"], {
     cwd: root,
-    env: { ...process.env, DOUYIN_WORKSPACE_ROOT: "D:\\动物大作战" },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -84,6 +102,16 @@ test("stdio MCP 注册工具并拒绝危险动作默认执行", async (t) => {
   assert.equal(blocked.result.isError, true);
   const payload = JSON.parse(blocked.result.content[0].text);
   assert.equal(payload.data.error.code, "CONFIRMATION_REQUIRED");
+
+  // douyin_ide_upload 的确认门必须在协议层直接验证：未显式 confirm=true 时拒绝，
+  // 且 handler 首行即拒绝，不会触达 IDE，也不会点击提交。
+  const ideUploadBlocked = await client.request("tools/call", {
+    name: "douyin_ide_upload",
+    arguments: { projectPath: fixtureMinigame, appVersion: "1.0.0", appChangelog: "smoke" },
+  });
+  assert.equal(ideUploadBlocked.result.isError, true);
+  const ideUploadPayload = JSON.parse(ideUploadBlocked.result.content[0].text);
+  assert.equal(ideUploadPayload.data.error.code, "CONFIRMATION_REQUIRED");
 });
 
 test("路径白名单拒绝工作区外路径", async (t) => {
@@ -173,7 +201,7 @@ test("create_minigame_project 对非空目录返回顶层失败（ok:false / isE
   // minigame 目录非空（三件套在），应顶层拒绝
   const called = await client.request("tools/call", {
     name: "douyin_create_minigame_project",
-    arguments: { projectPath: "D:\\动物大作战\\minigame", appid: "tt00000000000000000000" },
+    arguments: { projectPath: fixtureMinigame, appid: "tt00000000000000000000" },
   });
   assert.equal(called.result.isError, true, "非空目录必须顶层失败");
   const payload = JSON.parse(called.result.content[0].text);
@@ -219,7 +247,7 @@ test("open_project 身份错误必须顶层失败（isError:true），不得塞�
   const called = await client.request("tools/call", {
     name: "douyin_open_project",
     arguments: {
-      projectPath: "D:\\动物大作战\\minigame",
+      projectPath: fixtureMinigame,
       expectedAppid: "tt00000000000000000000",
       expectedProjectType: "minigame",
       timeoutMs: 60000,
@@ -236,4 +264,35 @@ test("open_project 身份错误必须顶层失败（isError:true），不得塞�
 });
 
 
+// 未配置工作区时必须明确拒绝，而不是静默把插件目录当工作区。
+test("未配置 DOUYIN_WORKSPACE_ROOT 时工具返回 WORKSPACE_NOT_CONFIGURED", async (t) => {
+  // 刻意启动一个**不带**工作区的服务器实例（模拟宿主漏配 env）
+  const env = { ...process.env };
+  delete env.DOUYIN_WORKSPACE_ROOT;
+  const isolated = startServerWithEnv(env);
+  t.after(() => isolated.close());
+  await isolated.request("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "douyin-ide-control-test", version: "0.2.0" },
+  });
+  isolated.notify("notifications/initialized");
 
+  // 需要工作区的工具必须顶层失败
+  const called = await isolated.request("tools/call", {
+    name: "douyin_project_size",
+    arguments: { projectPath: String.raw`D:\anything` },
+  });
+  assert.equal(called.result.isError, true, "未配置工作区必须顶层失败");
+  const payload = JSON.parse(called.result.content[0].text);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.data.error.code, "WORKSPACE_NOT_CONFIGURED");
+
+  // 环境检查工具应如实报告未配置，而不是抛错让人猜
+  const check = await isolated.request("tools/call", { name: "douyin_check_environment", arguments: {} });
+  const checkPayload = JSON.parse(check.result.content[0].text);
+  assert.equal(checkPayload.ok, true);
+  assert.equal(checkPayload.data.workspaceConfigured, false);
+  assert.equal(checkPayload.data.workspaceError.code, "WORKSPACE_NOT_CONFIGURED");
+  assert.equal(checkPayload.data.workspaceRoot, null);
+});

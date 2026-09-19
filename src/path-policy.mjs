@@ -1,13 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// 未显式配置时只允许访问当前进程工作目录，避免依赖任何机器的固定路径。
-const DEFAULT_WORKSPACE_ROOT = process.cwd();
-
+// 工作区必须由宿主显式配置（DOUYIN_WORKSPACE_ROOT）。
+//
+// 为什么不再回退到 process.cwd()：MCP 服务器由宿主拉起，cwd 往往是插件安装目录，
+// 静默采用它会让"工作区"变成插件目录，真实项目随即被白名单拒绝——失败信息还会误导用户。
+// 因此未配置时显式标记未配置，由调用方返回结构化的 WORKSPACE_NOT_CONFIGURED。
+const CONFIGURED_ROOT = process.env.DOUYIN_WORKSPACE_ROOT;
+export const WORKSPACE_CONFIGURED = Boolean(CONFIGURED_ROOT && String(CONFIGURED_ROOT).trim());
+// WORKSPACE_ROOT 在未配置时仅在内存里作为占位，任何路径校验都会先被 WORKSPACE_CONFIGURED 拦下。
 export const WORKSPACE_ROOT = path.resolve(
-  process.env.DOUYIN_WORKSPACE_ROOT || DEFAULT_WORKSPACE_ROOT,
+  WORKSPACE_CONFIGURED ? String(CONFIGURED_ROOT).trim() : process.cwd(),
 );
 export const PROJECT_ROOT = path.join(WORKSPACE_ROOT, "project");
+
+// 未配置工作区时统一的错误。调用方（server 层）把它转成顶层失败，而不是继续用插件目录。
+export function workspaceNotConfigured() {
+  const error = new Error("未配置工作区：请设置环境变量 DOUYIN_WORKSPACE_ROOT 指向你的项目根目录");
+  error.code = "WORKSPACE_NOT_CONFIGURED";
+  error.details = {
+    hint: "在宿主的 MCP 配置里为该服务器设置 DOUYIN_WORKSPACE_ROOT（例如 codex mcp 的 env，或插件/宿主的环境变量）",
+    configured: false,
+  };
+  return error;
+}
 
 function inside(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -80,6 +96,8 @@ function assertResolvedInside(candidate) {
 }
 
 export function allowedPath(input, fallback = PROJECT_ROOT) {
+  // 未配置工作区时直接失败：否则会把插件 cwd 当成工作区，真实项目被误判为越界。
+  if (!WORKSPACE_CONFIGURED) throw workspaceNotConfigured();
   const candidate = path.resolve(input || fallback);
   if (!inside(WORKSPACE_ROOT, candidate)) {
     throw pathError(`Path is outside allowed workspace: ${candidate}`);

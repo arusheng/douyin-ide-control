@@ -21,10 +21,15 @@ function powershellEnv() {
   for (const key of keep) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  // 固定使用已知存在的短临时目录，确保 Add-Type 编译临时文件可写
-  const temp = fs.existsSync("C:\\Users\\12138\\AppData\\Local\\Temp")
-    ? "C:\\Users\\12138\\AppData\\Local\\Temp"
-    : os.tmpdir();
+  // 固定使用一个确实可写的短临时目录，确保 Add-Type 编译临时文件可写。
+  // 不写死任何用户目录：优先用户 TEMP，其次系统 TEMP，最后 os.tmpdir()。
+  const candidates = [
+    process.env.TEMP,
+    process.env.TMP,
+    process.env.USERPROFILE && path.join(process.env.USERPROFILE, "AppData", "Local", "Temp"),
+    os.tmpdir(),
+  ];
+  const temp = candidates.find((candidate) => candidate && fs.existsSync(candidate)) || os.tmpdir();
   env.TEMP = temp;
   env.TMP = temp;
   env.TMPDIR = temp;

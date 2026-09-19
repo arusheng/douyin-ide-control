@@ -1,6 +1,6 @@
 {
   "name": "douyin-ide-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "安全封装抖音 tt-ide-cli 与本地 IDE 调试能力的 stdio MCP。",
@@ -8,11 +8,14 @@
     "start": "node src/server.mjs",
     "test": "node --test tests/*.test.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "check": "node --check src/server.mjs && node --check src/cli.mjs && node --check src/cdp.mjs && node --check src/native.mjs && node --check src/path-policy.mjs && node --check src/identity.mjs && node --check src/tmg.mjs && node --check src/proc.mjs"
+    "check": "node --check src/server.mjs && node --check src/cli.mjs && node --check src/cdp.mjs && node --check src/ide-upload.mjs && node --check src/native.mjs && node --check src/path-policy.mjs && node --check src/identity.mjs && node --check src/tmg.mjs && node --check src/proc.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "ws": "8.21.2",
     "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.12"
   }
 }

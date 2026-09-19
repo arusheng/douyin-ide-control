@@ -4,23 +4,56 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { redact, trimText } from "./path-policy.mjs";
 import { killTree } from "./proc.mjs";
 
-const TMG_PACKAGE = process.env.DOUYIN_TMG_PACKAGE
-  || path.join(process.cwd(), "node_modules", "tt-minigame-ide-cli");
-const TMG_BIN = path.join(TMG_PACKAGE, "bin", "tmg.js");
-// tmg 登录 cookie 文件：~/.tmg-cli/.cookies（tmg 2.1.1 无 check-session 命令）
+// tmg 包位置不写死：优先 DOUYIN_TMG_PACKAGE，其次 DOUYIN_NPM_GLOBAL_ROOT / npm root -g 推导。
+// 绑定固定盘符会导致换机器或 npm prefix 变化后整个 tmg 链路失效。
+function resolveTmgPackage() {
+  if (process.env.DOUYIN_TMG_PACKAGE) return process.env.DOUYIN_TMG_PACKAGE;
+  const roots = [];
+  if (process.env.DOUYIN_NPM_GLOBAL_ROOT) roots.push(process.env.DOUYIN_NPM_GLOBAL_ROOT);
+  try {
+    const out = execFileSync("npm", ["root", "-g"], {
+      encoding: "utf8", windowsHide: true, timeout: 8000, shell: true,
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+    const resolved = String(out || "").trim().split(/\r?\n/).filter(Boolean).pop();
+    if (resolved) roots.push(resolved);
+  } catch { /* npm 不可用时继续用包目录候选 */ }
+  // 兜底：本包自身的 node_modules（本地安装 tt-minigame-ide-cli 的场景）
+  roots.push(path.join(process.cwd(), "node_modules"));
+  for (const root of roots) {
+    const candidate = path.join(root, "tt-minigame-ide-cli");
+    if (fs.existsSync(path.join(candidate, "bin", "tmg.js"))) return candidate;
+  }
+  return null;
+}
+
+const TMG_PACKAGE = resolveTmgPackage();
+const TMG_BIN = TMG_PACKAGE ? path.join(TMG_PACKAGE, "bin", "tmg.js") : null;
+// tmg 登录 cookie 文件：~/.tmg-cli/.cookies（tmg 2.1.1 无 check-session 命令）。
+// 仅用于本机存在性判断，路径本身不对调用方回显。
 const TMG_COOKIE = path.join(os.homedir(), ".tmg-cli", ".cookies");
 
 export function tmgBinPath() {
-  return fs.existsSync(TMG_BIN) ? TMG_BIN : null;
+  return TMG_BIN && fs.existsSync(TMG_BIN) ? TMG_BIN : null;
 }
 
 // 运行 tmg 命令（必须 cwd=包目录）
 export function runTmg(args, { timeoutMs = 30000, env } = {}) {
   return new Promise((resolve) => {
+    if (!TMG_BIN || !TMG_PACKAGE) {
+      resolve({
+        exitCode: null,
+        timedOut: false,
+        error: "tt-minigame-ide-cli (tmg) 未找到",
+        stdout: "",
+        stderr: "tt-minigame-ide-cli (tmg) 未找到：请设置 DOUYIN_TMG_PACKAGE 或 DOUYIN_NPM_GLOBAL_ROOT",
+      });
+      return;
+    }
     const childEnv = { ...process.env, FORCE_COLOR: "0" };
     delete childEnv.ELECTRON_RUN_AS_NODE;
     if (env) Object.assign(childEnv, env);
@@ -57,12 +90,18 @@ export function runTmg(args, { timeoutMs = 30000, env } = {}) {
 
 export async function inspectTmg() {
   const cli = tmgBinPath();
-  if (!cli) return { path: null, installed: false, reason: "未找到 tt-minigame-ide-cli（tmg）" };
+  if (!cli) {
+    return {
+      installed: false,
+      reason: "未找到 tt-minigame-ide-cli（tmg）",
+      hint: "请设置 DOUYIN_TMG_PACKAGE 指向 tt-minigame-ide-cli 包目录，或 DOUYIN_NPM_GLOBAL_ROOT 指向 npm 全局根目录",
+    };
+  }
   const version = await runTmg(["--version"], { timeoutMs: 10000 });
-  // tmg 2.1.1 无 check-session 命令；登录态以 cookie 文件是否存在为准
+  // tmg 2.1.1 无 check-session 命令；登录态以 cookie 文件是否存在为准。
+  // 只回状态，不回显 cookie 文件路径（路径属于本机信息，对调用方无价值）。
   const cookieExists = fs.existsSync(TMG_COOKIE) && fs.statSync(TMG_COOKIE).size > 0;
   return {
-    path: cli,
     installed: true,
     version: version.stdout || version.stderr || null,
     session: {

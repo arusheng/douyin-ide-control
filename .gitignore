@@ -1,14 +1,42 @@
+# 依赖
 node_modules/
-.scratch/
-.mcp-smoke/
-.env
-.env.*
+
+# 本机实验脚本归档（历史上传探测脚本，不入库）
+scratch/
+
+# 日志
+log/
+logs/
 *.log
+
+# 截图与预览二维码（可能含本机画面/工程信息）
 *.png
 *.jpg
 *.jpeg
 *.gif
+*.webp
 *.mp4
+*.qrcode
+qa/
+
+# 临时文件与打包产物
+*.tmp
+*.temp
 *.zip
 dist/
 build/
+.scratch/
+.mcp-smoke/
+
+# 本机配置与凭据（绝不入库）
+.env
+.env.*
+*.local.json
+.mcp.local.json
+config.local.*
+
+# 编辑器/系统
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
