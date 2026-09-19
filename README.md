@@ -8,7 +8,7 @@
 - 所有项目和输出路径都必须位于工作区内，避免误操作其他目录。
 - `DOUYIN_TMA_CLI_JS` 可选，用于显式指定本机 `tt-ide-cli` 的 `tma.js`。
 - 本仓库不包含 AppID、Token、Cookie、密码、API key、登录配置或本机截图。
-- 上传、提审、设置 AppID Token 等高风险动作必须显式确认。
+- 上传、提审、设置 AppID Token 等高风险动作必须显式确认（包括 `douyin_ide_upload`）。
 
 ## 小程序 / 小游戏路由
 
@@ -26,6 +26,8 @@
 - `douyin_preview`、`douyin_build_npm`、`douyin_project_size`：预览、构建和体积检查。
 - `douyin_compile_refresh`、`douyin_capture`、`douyin_read_console_errors`：编译刷新、截图和控制台读取。
 - `douyin_upload`、`douyin_audit`：上传和提审，必须显式传入 `confirm=true`。
+- `douyin_ide_preview`：绕过 CLI 登录态，直接点击已登录 IDE workbench 的「预览」按钮，从 DOM 提取预览二维码 PNG 保存到工作区。
+- `douyin_ide_upload`：绕过 CLI 登录态，直接操控已登录 IDE 完成「上传→填版本/更新日志→确定」；必须显式传入 `confirm=true`，上传以 IDE 当前登录账号执行（远程副作用）。
 - `douyin_audit_hosts`、`douyin_set_app_config`、`douyin_project_version`：平台信息和版本辅助操作。
 
 所有动作都有超时；返回值包含 `ok`、`action`、`elapsedMs` 和结构化错误字段。日志只写入 stderr，并对 Token、Cookie、密码和 Authorization 等字段脱敏。
@@ -81,6 +83,7 @@ npm run smoke
 ## IDE 兼容边界
 
 - CDP 端口会随 IDE 实例变化，可通过 `DOUYIN_IDE_CDP_PORT` 显式指定。
+- `douyin_ide_preview`/`douyin_ide_upload` 依赖 workbench 调试页面（CDP）可用；找不到 workbench 页面时返回明确的不支持原因，不做截图识别或坐标猜测。
 - MCP 优先使用本地 CDP DOM，不使用截图识别或坐标猜测。
 - IDE 全窗截图要求窗口可见；模拟器截图使用 Webview CDP。
 - 控制台读取属于 best-effort，无法取得时返回明确的不支持状态，不伪造错误内容。

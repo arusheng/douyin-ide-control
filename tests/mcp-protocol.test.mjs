@@ -72,7 +72,10 @@ test("stdio MCP 注册工具并拒绝危险动作默认执行", async (t) => {
   assert.ok(names.includes("douyin_audit_hosts"), "应注册 douyin_audit_hosts");
   assert.ok(names.includes("douyin_set_app_config"), "应注册 douyin_set_app_config");
   assert.ok(names.includes("douyin_project_version"), "应注册 douyin_project_version");
-  assert.equal(names.length, 17, `工具总数应为 17，实际 ${names.length}`);
+  // IDE 内操控（绕过 CLI 登录）新增工具必须注册
+  assert.ok(names.includes("douyin_ide_preview"), "应注册 douyin_ide_preview");
+  assert.ok(names.includes("douyin_ide_upload"), "应注册 douyin_ide_upload");
+  assert.equal(names.length, 19, `工具总数应为 19，实际 ${names.length}`);
 
   const blocked = await client.request("tools/call", {
     name: "douyin_upload",

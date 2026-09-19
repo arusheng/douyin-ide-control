@@ -7,7 +7,7 @@ import {
   auditHosts, auditProject, buildNpm, inspectCli, openProjectWithReadiness,
   previewProject, projectSize, resolveOpenRouting, setAppConfig, setReadinessProbes, uploadProject,
 } from "./cli.mjs";
-import { captureSimulator, clickWorkbenchText, getIdeStatus, readConsoleErrors } from "./cdp.mjs";
+import { captureSimulator, clickWorkbenchText, getIdeStatus, previewInIde, readConsoleErrors, uploadInIde } from "./cdp.mjs";
 import {
   captureIdeWindow, focusIde, getIdeWindowInfo, getUiaInfo, invokeUiaControl, sendShortcut,
 } from "./native.mjs";
@@ -654,6 +654,57 @@ server.registerTool("douyin_project_version", {
     latestVersion: extractLatestVersion(command.stdout || "") || null,
     command: commandData(command),
   };
+}));
+
+server.registerTool("douyin_ide_preview", {
+  title: "在 IDE 内生成预览二维码（绕过 CLI 登录）",
+  description: "直接点击已登录抖音开发者工具 workbench 的「预览」按钮生成预览二维码（无需 CLI 登录态），从 DOM 提取二维码 PNG 保存到工作区。",
+  inputSchema: { projectPath: z.string().optional(), outputPath: z.string().optional(), timeoutMs: z.number().int().optional() },
+}, async (args) => run("douyin_ide_preview", async () => {
+  const projectPath = args?.projectPath ? allowedPath(args.projectPath) : undefined;
+  const output = ensureOutputPath(args?.outputPath, path.join(WORKSPACE_ROOT, "qa", "mcp", "ide-preview-qr.png"));
+  const result = await previewInIde({ projectPath, timeoutMs: timeout(args, 25000) });
+  if (!result.supported || !result.qr?.data) {
+    const error = new Error(result.reason || "未提取到预览二维码");
+    error.code = "IDE_PREVIEW_FAILED";
+    throw error;
+  }
+  outputFile(output);
+  const data = Buffer.from(result.qr.data, "base64");
+  fs.writeFileSync(output, data);
+  return {
+    output,
+    bytes: data.length,
+    qr: { width: result.qr.width, height: result.qr.height, mime: result.qr.mime },
+    click: result.click,
+    source: "IDE workbench DOM",
+  };
+}));
+
+server.registerTool("douyin_ide_upload", {
+  title: "在 IDE 内上传（绕过 CLI 登录，危险）",
+  description: "直接操控已登录的抖音开发者工具完成上传：点击「上传」→ 填写版本号/更新日志 → 点击「确定」。无需 CLI 登录态。默认拒绝，必须 confirm=true；上传将以 IDE 当前登录账号执行（远程副作用）。",
+  inputSchema: {
+    projectPath: z.string().optional(),
+    appVersion: z.string().optional(),
+    appChangelog: z.string().min(1),
+    confirm: z.boolean().optional(),
+    timeoutMs: z.number().int().optional(),
+  },
+}, async (args) => run("douyin_ide_upload", async () => {
+  if (args?.confirm !== true) throw confirmationError("douyin_ide_upload");
+  const projectPath = args?.projectPath ? allowedPath(args.projectPath) : undefined;
+  const result = await uploadInIde({
+    projectPath, appVersion: args?.appVersion, appChangelog: args.appChangelog,
+    hitsSubmit: true, timeoutMs: timeout(args, 60000),
+  });
+  if (!result.supported || !result.submitted) {
+    const error = new Error(result.reason || "IDE 内上传未完成");
+    error.code = "IDE_UPLOAD_FAILED";
+    error.details = { click: result.click, submit: result.submit, filled: result.filled };
+    throw error;
+  }
+  return { confirmed: true, submitted: true, filled: result.filled, submit: result.submit };
 }));
 
 const transport = new StdioServerTransport();

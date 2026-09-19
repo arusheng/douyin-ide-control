@@ -1,6 +1,6 @@
 {
   "name": "douyin-ide-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "安全封装抖音 tt-ide-cli 与本地 IDE 调试能力的 stdio MCP。",

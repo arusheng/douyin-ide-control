@@ -1,6 +1,6 @@
 {
   "name": "douyin-ide-control",
-  "version": "0.1.0+codex.20260806221800",
+  "version": "0.2.0+codex.20260919191839",
   "description": "通过官方 tt-ide-cli 与本地 IDE 调试接口安全控制抖音开发者工具。",
   "author": {
     "name": "Local developer"
