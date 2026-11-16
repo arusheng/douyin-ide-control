@@ -212,7 +212,8 @@ npx skills add $(tma get-skill-path)
 
 ## 版本
 
-- **0.3.0**（当前）：同步实际运行插件的演进实现。`douyin_ide_upload` 全面收紧：`projectPath`/`appVersion`/`appChangelog` 必填（不再提供默认版本号），上传前严格绑定目标工程并核对身份，信任弹窗独立授权（`confirmTrust`），提交按钮只在表单弹窗内查找，结果三态 `success`/`failed`/`unverified`，结果不明不自动重试；工作区未配置时返回 `WORKSPACE_NOT_CONFIGURED`（不再回退 `process.cwd()`）；`douyin_ide_preview` 支持 `expectedAppid` 预核对；CLI 与 tmg 包路径不再写死盘符。上传逻辑独立为 `src/ide-upload.mjs`，新增 `tests/ide-upload.test.mjs` 与 `tests/cwd.test.mjs`，MCP 协议层直接验证 `douyin_ide_upload` 的确认门。
+- **0.3.1**（当前）：补 MIT LICENSE 文件与 package.json license 字段。
+- **0.3.0**：同步实际运行插件的演进实现。`douyin_ide_upload` 全面收紧：`projectPath`/`appVersion`/`appChangelog` 必填（不再提供默认版本号），上传前严格绑定目标工程并核对身份，信任弹窗独立授权（`confirmTrust`），提交按钮只在表单弹窗内查找，结果三态 `success`/`failed`/`unverified`，结果不明不自动重试；工作区未配置时返回 `WORKSPACE_NOT_CONFIGURED`（不再回退 `process.cwd()`）；`douyin_ide_preview` 支持 `expectedAppid` 预核对；CLI 与 tmg 包路径不再写死盘符。上传逻辑独立为 `src/ide-upload.mjs`，新增 `tests/ide-upload.test.mjs` 与 `tests/cwd.test.mjs`，MCP 协议层直接验证 `douyin_ide_upload` 的确认门。
 - **0.2.0**：初版 IDE 内预览/上传工具（`douyin_ide_preview`/`douyin_ide_upload`）。
 
 ## 目录结构
